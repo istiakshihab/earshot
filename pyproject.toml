@@ -3,7 +3,8 @@ name = "ownscribe"
 version = "0.15.0"
 description = "Fully local meeting transcription and summarization CLI"
 readme = "README.md"
-license = "MIT"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "NOTICE"]
 authors = [
     { name = "Pascal Berrang", email = "git@p4l.dev" }
 ]
@@ -13,7 +14,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",

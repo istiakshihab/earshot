@@ -1,255 +1,200 @@
-# ownscribe
+<p align="center">
+  <img src="app/Resources/Logo.png" width="128" alt="Earshot icon">
+</p>
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-
-Local-first meeting transcription and summarization CLI.
-Record, transcribe, and summarize meetings and system audio entirely on your machine – no cloud, no bots, no data leaving your device by default.
-
-> **This is a personal fork** of [paberr/ownscribe](https://github.com/paberr/ownscribe), diverged in two ways from upstream:
-> transcription runs on [MLX](https://github.com/ml-explore/mlx) (Apple GPU) instead of WhisperX/CTranslate2 (CPU-only),
-> and finished transcripts can be auto-filed into an Obsidian vault as categorized notes. Install instructions below
-> reflect this fork, not the PyPI package.
-
-> System audio capture requires **macOS 14.2 or later**. Transcription requires Apple Silicon (MLX is Metal-only).
-
-## Table of Contents
-
-- [Privacy](#privacy)
-- [Features](#features)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Configuration](#configuration)
-- [Summarization Templates](#summarization-templates)
-- [Speaker Diarization](#speaker-diarization)
-- [Obsidian Vault Filing](#obsidian-vault-filing)
-- [Acknowledgments](#acknowledgments)
-- [Contributing](#contributing)
-- [License](#license)
-
-## Privacy
-
-ownscribe **does not**, by default:
-
-- send audio to external servers
-- upload transcripts
-- require cloud APIs
-- store data outside your machine
-
-All audio, transcripts, and summaries remain local. Transcription (MLX Whisper), diarization (pyannote), and local
-summarization (Phi-4-mini) all run on-device.
-
-**Two opt-in exceptions:** [Obsidian vault filing](#obsidian-vault-filing) and [speaker naming](#speaker-diarization)
-both send transcript *text* (never audio) to Claude via the `claude` CLI — vault filing to categorize/summarize it
-into a note, speaker naming to describe each speaker's role so you can identify them. Both are enabled by default in
-this fork's config — set `[obsidian] enabled = false` and `[diarization] ask_speaker_names = false` to keep
-everything fully local, or use a hosted [summarization backend](#configuration) instead if you want LLM
-summarization without either.
+<h1 align="center">Earshot</h1>
 
 <p align="center">
-  <img src="docs/demo-pipeline.gif" alt="ownscribe demo" width="750">
+  Record, transcribe and summarize meetings on your Mac. The audio never leaves it.
 </p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg" alt="License: GPL v3 or later"></a>
+  <img src="https://img.shields.io/badge/macOS-26%2B-black.svg" alt="macOS 26+">
+  <img src="https://img.shields.io/badge/Apple%20silicon-required-black.svg" alt="Apple silicon">
+</p>
+
+Earshot is a native Mac app for recording calls, lectures and conversations. It records your microphone,
+the system audio and, if you want, single apps (Zoom, Teams, a browser) as separate sources, then turns
+the recording into a transcript with speaker names, a summary, and optionally a note in your Obsidian
+vault. Transcription and speaker identification run on your Mac's GPU.
+
+It notices when a Zoom or Microsoft Teams call starts and asks whether to record it, then stops by
+itself when the call ends.
+
+Earshot is a fork of [ownscribe](https://github.com/paberr/ownscribe) by Pascal Berrang. The Python
+backend and command-line tool are still called `ownscribe`; Earshot is the Mac app on top of them, plus
+MLX transcription, Obsidian filing and the capture work described below.
+
+## Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Using Earshot](#using-earshot)
+- [Privacy](#privacy)
+- [Configuration](#configuration)
+- [Speaker identification](#speaker-identification)
+- [Obsidian filing](#obsidian-filing)
+- [The command-line tool](#the-command-line-tool)
+- [Development](#development)
+- [Acknowledgments](#acknowledgments)
+- [License](#license)
 
 ## Features
 
-- **System audio capture** — records all system audio natively via Core Audio Taps (macOS 14.2+), no virtual audio drivers needed
-- **Microphone capture** — records system + mic audio simultaneously by default (press `m` to mute/unmute, or use `--no-mic`). The mic in use is shown when recording starts, a mic that delivers only silence is flagged live, and a Bluetooth headset that macOS made the default input is skipped in favour of the built-in mic (`mic_avoid_bluetooth`)
-- **MLX Whisper transcription** — GPU-accelerated speech-to-text on Apple Silicon, with word-level timestamps
-- **Speaker diarization** — optional speaker identification via pyannote (requires HuggingFace token; runs on MPS), with an interactive prompt to name each speaker afterward
-- **Pipeline progress** — live checklist showing transcription, diarization sub-steps, and summarization progress
-- **Local LLM summarization** — structured meeting notes with a built-in model (Phi-4-mini); also supports Ollama, LM Studio, or any OpenAI-compatible server
-- **Summarization templates** — built-in presets for meetings, lectures, and quick briefs; define your own in config
-- **Ask your meetings** — ask natural-language questions across all your meeting notes; uses a two-stage LLM pipeline with keyword fallback
-  <br><img src="docs/demo-ask.gif" alt="ownscribe ask demo" width="700">
-- **Obsidian vault filing** — every transcript is categorized, summarized, and filed into an Obsidian vault as a note, with a confirm-before-write preview
-- **Silence auto-stop** — automatically stops recording after sustained silence (default: 5 minutes, configurable)
-- **One command** — just run `ownscribe`, press Ctrl+C when done, get transcript + vault note
+- **Mixer.** Mic, system audio and any running app each get a meter, a fader and a mute button, with a
+  60-second level chart above them. Each source is recorded to its own track, then mixed down.
+- **Per-app capture.** Give an app its own source with Core Audio process taps. There are no virtual
+  audio drivers, and the rest of the system audio stays on its own track.
+- **Mic handling.** Earshot picks the mic automatically and skips a Bluetooth headset that macOS made the
+  default input, using the built-in mic instead. A mic that only delivers silence is flagged while you
+  record.
+- **Call detection.** Earshot spots Zoom and Teams calls from which apps are using the mic and speakers,
+  so it needs no extra permission. A small panel asks whether to record, and a recording started that way
+  stops when the call ends.
+- **On-device transcription.** [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)
+  on the Apple GPU, with word-level timestamps.
+- **Speaker identification.** [pyannote](https://github.com/pyannote/pyannote-audio) runs on the GPU
+  alongside Whisper, and you name the speakers afterwards.
+- **Summaries.** Templates for meetings, lectures and short briefs, or your own. They come from a built-in
+  local model, Ollama, LM Studio, any OpenAI-compatible server, or the `claude` CLI.
+- **Obsidian filing.** A recording becomes a categorized note in your vault, and you review it before it's
+  written.
+- **History.** Every past recording is in the sidebar, searchable. You can rename speakers, summarize
+  again or file any of them.
+- **Safe recordings.** A source that stops delivering audio is detected and reconnected, and the gap is
+  logged. A crash leaves per-source tracks on disk that Earshot can rebuild into a recording.
 
 ## Requirements
 
-- macOS 14.2+ on Apple Silicon (system audio capture *and* MLX transcription both require it)
-- Python 3.12+
-- [ffmpeg](https://ffmpeg.org/) — `brew install ffmpeg`
-- Xcode Command Line Tools (`xcode-select --install`)
-- [Claude Code](https://github.com/anthropics/claude-code) CLI (`claude`), authenticated — needed for
-  [Obsidian vault filing](#obsidian-vault-filing) and [speaker naming](#speaker-diarization), both enabled by default
+- A Mac with Apple silicon and macOS 26 or later for the app. The command-line tool alone needs macOS
+  14.2 or later.
+- About 2 GB of disk for the backend, plus the models, which download on first use.
+- A free [Hugging Face](https://huggingface.co) token, for speaker identification.
+- The [Claude Code](https://github.com/anthropics/claude-code) CLI (`claude`), signed in. It's only needed
+  for Obsidian filing, the `claude` summary backend, and speaker descriptions in the terminal.
 
-Summarization works out of the box — a local model (Phi-4-mini, ~2.4 GB) downloads automatically on first run. Optionally, you can use [Ollama](https://ollama.ai), [LM Studio](https://lmstudio.ai), or any OpenAI-compatible server instead (see [Configuration](#configuration)).
+The installer sets up everything else: Apple's Command Line Tools, [uv](https://docs.astral.sh/uv/) and
+ffmpeg (through Homebrew).
 
-Works with any app that outputs audio through Core Audio (Zoom, Teams, Meet, etc.).
+## Install
 
-> **Tip:** Your terminal app (Terminal, iTerm2, VS Code, etc.) needs **Screen Recording** permission to capture system audio.
-> Open the settings panel directly with:
-> ```bash
-> open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-> ```
-> Enable your terminal app, then restart it. Both capture modes need this permission, `picker` and `all` alike.
->
-> The microphone is recorded by default, so macOS also asks for **Microphone** permission on the first run.
-> If you dismissed that prompt, enable your terminal app here:
-> ```bash
-> open "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
-> ```
-> Recording fails to start while the microphone is unavailable — use `--no-mic` to capture system audio only.
-
-## Installation
-
-### Earshot, the Mac app (one command)
-
-On an Apple silicon Mac with macOS 26 or later, paste this into Terminal:
+Paste this into Terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/istiakshihab/ownscribe-personalized/main/install.sh | bash
 ```
 
-It installs what's missing (Apple's Command Line Tools, [uv](https://docs.astral.sh/uv/), ffmpeg through
-Homebrew), downloads this repo to `~/.local/share/earshot/ownscribe`, sets up the Python backend (about 2 GB the
-first time), builds the capture helper and Earshot, and puts `Earshot.app` in `/Applications`. Everything is built
-on your Mac, so macOS doesn't block it as an unsigned download. Run the same command again to update;
-`… | bash -s -- --uninstall` removes the app and the downloaded source (it asks first, and keeps recordings,
-config and models). From a checkout, `bash install.sh` builds and installs that checkout instead. See
-`bash install.sh --help` for options.
+The installer does the following:
+- puts the source in `~/.local/share/earshot/ownscribe`;
+- sets up the Python backend;
+- builds the capture helper and the app on your Mac;
+- copies `Earshot.app` to `/Applications` (or `~/Applications` when `/Applications` isn't writable);
+- opens Earshot.
 
-After installing, add a Hugging Face token in Earshot ▸ Settings ▸ Hugging Face so it can tell speakers apart
-(see [Speaker Diarization](#speaker-diarization)).
+Because everything is built locally, macOS doesn't block Earshot as an unsigned download.
 
-### The command-line tool
+**Update** by quitting Earshot and running the same command again. Use the menu bar icon ▸ Quit Earshot,
+or ⌘Q: closing the window leaves it running in the menu bar. Updates never touch recordings, settings or
+downloaded models.
 
-This fork is installed from source with a plain virtualenv — no `uv` involved.
-
-```bash
-# Clone the repo
-git clone https://github.com/paberr/ownscribe.git
-cd ownscribe
-
-# Build the Swift audio capture helper (optional - auto-downloads if skipped)
-bash swift/build.sh
-
-# Create and activate a venv, then install (editable: changes to the checkout
-# take effect without reinstalling)
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e '.[all]'
-```
-
-`ownscribe` then runs as a normal command as long as the venv is active — reactivate it in new shells with
-`source .venv/bin/activate` (or add that line to your shell profile).
-
-If you'd rather use a conda/mamba environment instead of `.venv`, the same `pip install -e '.[all]'` works inside
-any activated Python 3.12 environment.
-
-### Alternative summarization backends
-
-The built-in local model works out of the box. If you'd rather call a hosted backend, install the matching extra:
+**Uninstall** with the same command plus `--uninstall`. It asks first, removes the app and the downloaded
+source, and keeps your recordings, config and models:
 
 ```bash
-pip install -e '.[ollama]'   # use Ollama
-pip install -e '.[openai]'   # use any OpenAI-compatible server (LM Studio, llama-server, etc.)
-pip install -e '.[all]'      # install everything (default above)
+curl -fsSL https://raw.githubusercontent.com/istiakshihab/ownscribe-personalized/main/install.sh | bash -s -- --uninstall
 ```
 
-Or set `backend = "claude"` in `[summarization]` to summarize with the headless `claude` CLI (Claude Code,
-Sonnet, no tools) — the same integration vault filing uses. It needs no extra install, just a signed-in
-`claude` on PATH (or `[paths] claude`).
+Other options go after `bash -s --`, and `bash install.sh --help` lists them all:
 
-## Usage
+| option | what it does |
+|---|---|
+| `--branch NAME` | install another branch (default `main`) |
+| `--dir DIR` | keep the source somewhere else |
+| `--app-dir DIR` | put `Earshot.app` somewhere else |
+| `--no-open` | don't open Earshot at the end |
 
-### Record, transcribe, and summarize a meeting
+From a checkout, `bash install.sh` builds and installs that checkout instead.
 
-```bash
-ownscribe                    # records system audio + mic, Ctrl+C to stop
-```
+### First run
 
-This will:
-1. Capture system audio and your microphone until you press Ctrl+C (or auto-stop after 5 minutes of silence); press `m` to mute/unmute the mic while recording
-2. Transcribe with MLX Whisper (and diarize, if enabled)
-3. Summarize with your local LLM (if `[summarization] enabled = true`)
-4. File the transcript into your Obsidian vault as a categorized note, with a preview you confirm before it's written (if `[obsidian] enabled = true`)
-5. Save everything to `~/ownscribe/YYYY-MM-DD_HHMM/`, renamed to `~/ownscribe/YYYY-MM-DD_HHMM_meeting-title/` once the local summary produces a title
+- **Permissions.** The first recording asks for **Microphone** and **System Audio Recording** access for
+  Earshot. The app is ad-hoc signed, so a rebuild may ask again.
+- **Speaker identification.** Accept the terms of
+  [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1).
+  Then create a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) and paste
+  it into Earshot ▸ Settings ▸ Hugging Face. **Test token** checks that it works.
+- **Model downloads.** Models download the first time they're needed: Whisper, pyannote, and the local
+  summary model (Phi-4-mini, about 2.4 GB).
 
-> **Note:** By default, ownscribe records all system audio directly with no prompt. To show a macOS source picker on each launch instead, set `capture_mode = "picker"` in the `[audio]` config section.
+## Using Earshot
 
-On first run, the Whisper model, pyannote, and the summarization model may download model files. ownscribe shows a `Preparing models` step and best-effort download progress in the TUI while this happens. Use `ownscribe warmup` to pre-download all models.
+1. **Record.** Press **Record** (⌘R). Pick the mic, add apps as their own sources with **Add source**, and
+   set the levels in the mixer while it records.
+2. **Stop.** Press **Stop** (⌘R) and the recording is saved. Processing then starts: transcription,
+   speaker identification and a summary, each shown on its own card. Speaker identification and the
+   summary can be switched off.
+3. **Name the speakers** in the **Who's speaking?** fields above the transcript. The transcript and summary
+   update with the names.
+4. **File to Obsidian** if it's set up. Earshot drafts the note, and you can edit the title, category,
+   tags and text before it's written.
 
-### Options
+Past recordings are in the sidebar. Opening one shows the same view, so all of this works on old
+recordings too.
 
-```bash
-ownscribe --no-mic                            # capture system audio only (the mic is on by default)
-ownscribe --mic-device "MacBook Pro Microphone" # capture system audio + a specific mic instead of the default one
-ownscribe --device "MacBook Pro Microphone"   # use mic instead of system audio (switches to the sounddevice backend)
-ownscribe --no-summarize                      # skip local LLM summarization
-ownscribe --diarize                           # enable speaker identification
-ownscribe --language en                       # set transcription language (default: auto-detect)
-ownscribe --model large-v3                    # use a larger Whisper model
-ownscribe --format json                       # output as JSON instead of markdown
-ownscribe --no-keep-recording                 # auto-delete WAV files after transcription
-ownscribe --template lecture                  # use the lecture summarization template
-ownscribe --silence-timeout 600               # auto-stop after 10 minutes of silence
-ownscribe --silence-timeout 0                 # disable silence auto-stop
-```
+### Call detection
 
-### Subcommands
+When a Zoom or Microsoft Teams call starts in the desktop app, a small panel appears at the top right of
+the screen and asks **Record** or **Not now**. It sits over the call without taking focus. If you
+record, the meeting app gets its own source next to the mic and system audio. About 20 seconds after the
+call ends, that recording stops and goes through processing. Recordings you start yourself are never
+stopped by detection.
 
-```bash
-ownscribe devices                  # list audio devices (uses native CoreAudio when available)
-ownscribe apps                     # list running apps with PIDs
-ownscribe warmup                   # prefetch MLX Whisper/pyannote models before a meeting
-ownscribe transcribe recording.wav # transcribe an audio or video file: wav/mp3/mp4/mov/mkv (saved alongside)
-ownscribe summarize transcript.md  # summarize a transcript (saves alongside the input)
-ownscribe resume ./2026-02-20_1736 # resume a partial run, or process a folder's audio/video recording
-ownscribe ask "question"           # search your meetings with a natural-language question
-ownscribe config                   # open config file in $EDITOR
-ownscribe cleanup                  # remove ownscribe data from disk
-```
+Settings ▸ Meetings:
 
-### Driving ownscribe from an app
+| setting | default |
+|---|---|
+| Detect Zoom and Teams calls | on |
+| Start recording automatically | off |
+| Stop when the call ends | on |
+| Keep running in the menu bar | on |
+| Open at login | off |
 
-A GUI ([Earshot](app/README.md), the SwiftUI app in `app/`, built with `bash app/build.sh`) records with `bin/ownscribe-audio capture --session DIR --control stdio`
-and runs each processing step as a job that reports JSON events. See [docs/engine-protocol.md](docs/engine-protocol.md);
-`scripts/mock_engine.py` fakes both halves and `scripts/engine_demo.py` drives the real ones from a terminal.
+Calls in a browser, and other apps (Google Meet on the web, Slack huddles, FaceTime), aren't detected.
+Utilities that quit apps when their last window closes, such as Vorssaint's auto-quit, need Earshot
+excluded, or it won't stay in the menu bar.
 
-```bash
-ownscribe session new --json                     # create a session folder for a recording
-ownscribe process SESSION --events-fd 3          # transcribe, diarize, summarize with progress events
-ownscribe speakers SESSION --set SPEAKER_00=Alice # name speakers; re-renders transcript and summary
-ownscribe resummarize SESSION --template brief   # summarize again with another template
-ownscribe file SESSION --preview | --write       # Obsidian vault note: preview, then write
-ownscribe sessions --json                        # list recordings and their processing status
-ownscribe templates --json                       # built-in and custom summary templates
-ownscribe doctor                                 # ffmpeg, HF token, claude, models, disk space
-```
+The ad-hoc-signed app can't post macOS notifications, which is why the prompt is a panel.
 
-> **Video files work too.** Anywhere ownscribe accepts an audio file it also accepts a video container (mp4, mov, mkv, m4v) — it extracts the audio track via ffmpeg. To turn a recording into full notes, drop it in a folder and run `ownscribe resume ./that-folder/` (transcript + summary); use `ownscribe transcribe meeting.mp4` for a transcript only.
+[app/README.md](app/README.md) covers the app in more detail: settings, the mock engine for trying it
+without audio, and how it talks to the backend.
 
-`transcribe` and `resume` also run the [Obsidian vault-filing](#obsidian-vault-filing) step, same as a live recording — they share the same underlying pipeline.
+## Privacy
 
-Use `warmup` ahead of time to avoid first-run model download delays while recording:
+By default, Earshot:
 
-```bash
-ownscribe warmup                    # prefetch the Whisper model (+ diarization if enabled in config)
-ownscribe warmup --with-diarization # force diarization warmup for this run
-```
+- doesn't send audio anywhere;
+- doesn't upload transcripts;
+- doesn't need any cloud service;
+- keeps everything in its save folder (`~/ownscribe` unless you change it).
 
-### Searching Meeting Notes
+Transcription (MLX Whisper), speaker identification (pyannote) and the default summaries (Phi-4-mini)
+all run on your Mac.
 
-Use `ask` to search across all your meeting notes with natural-language questions:
+Some features send transcript *text*, never audio, to Claude through the `claude` CLI, and only if you
+use them:
+- **Obsidian filing**, to categorize the transcript and write the note;
+- **speaker naming in the terminal**, which describes each speaker's role so you can tell them apart;
+- **the `claude` summary backend**, if you choose it.
 
-```bash
-ownscribe ask "What did Anna say about the deadline?"
-ownscribe ask "budget decisions" --since 2026-01-01
-ownscribe ask "action items from last week" --limit 5
-```
-
-This runs a two-stage pipeline:
-1. **Find** — sends meeting summaries to the LLM to identify which meetings are relevant
-2. **Answer** — sends the full transcripts of relevant meetings to the LLM to produce an answer with quotes
-
-If the LLM finds no relevant meetings, a keyword fallback searches summaries and transcripts directly.
+To keep everything local, set `[obsidian] enabled = false` and `[diarization] ask_speaker_names = false`,
+and keep `[summarization] backend = "local"`.
 
 ## Configuration
 
-Config is stored at `~/.config/ownscribe/config.toml`. Run `ownscribe config` to create and edit it.
+The app and the command-line tool share `~/.config/ownscribe/config.toml`. Run `ownscribe config` to
+create and open it.
 
 ```toml
 [audio]
@@ -262,65 +207,48 @@ capture_mode = "all"      # "all" = capture all system audio directly; "picker" 
 silence_timeout = 300     # seconds of silence before auto-stop; 0 = disabled
 
 [transcription]
-model = "base"            # tiny, base, small, medium, large-v3 (mapped to an mlx-community MLX conversion)
+model = "base"            # tiny, base, small, medium, large-v3, or an mlx-community repo id
 language = ""             # empty = auto-detect
-threads = 0               # unused by the MLX backend (GPU-only); kept for config compatibility
 # initial_prompt = ""     # prime Whisper with context: domain vocab, speaker names, expected phrases
-# hotwords = ""           # folded into initial_prompt (MLX has no dedicated hotwords mechanism)
 
 [diarization]
 enabled = false
-hf_token = ""             # HuggingFace token for pyannote
+hf_token = ""             # Hugging Face token for pyannote (Earshot ▸ Settings ▸ Hugging Face writes it here)
 min_speakers = 0          # 0 = auto-detect
 max_speakers = 0
-telemetry = false         # allow HuggingFace Hub + pyannote metrics telemetry
-device = "auto"           # "auto" (mps if available), "mps", or "cpu"
+device = "auto"           # "auto" (GPU when available), "mps", or "cpu"
 parallel = true           # find speakers while Whisper transcribes (false = one after the other)
-ask_speaker_names = true  # interactively name SPEAKER_00/01/... after diarization (skipped when not a TTY)
+ask_speaker_names = true  # terminal only: name SPEAKER_00/01/... after diarization
 
 [summarization]
 enabled = true
-backend = "local"         # "local" (built-in, no server needed), "claude" (claude CLI), "ollama", or "openai"
-model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/file.gguf; ollama/openai: model name
-# host = "http://localhost:11434"  # only for ollama/openai backends
-# api_key = ""            # only for openai backend; required by servers like oMLX (or set OPENAI_API_KEY)
+backend = "local"         # "local" (built-in), "claude" (claude CLI), "ollama", or "openai"
+model = "phi-4-mini"      # local: "phi-4-mini", a GGUF path, or hf:owner/repo/file.gguf; others: model name
+# host = "http://localhost:11434"  # ollama/openai only
+# api_key = ""            # openai only (or set OPENAI_API_KEY)
 # template = "meeting"    # "meeting", "lecture", "brief", or a custom name
-# context_size = 0        # context window in tokens; 0 = auto-detect (8192 for local). Longer
-                          # transcripts are summarized in chunks and merged, whatever the size.
-
-# Custom templates (optional):
-# [templates.my-standup]
-# system_prompt = "You summarize daily standups."
-# prompt = "List each person's update:\n{transcript}"
+# context_size = 0        # context window in tokens; 0 = auto-detect
 
 [output]
 dir = "~/ownscribe"
-audio_dir = ""            # directory for audio recordings; empty = same as dir
 format = "markdown"       # "markdown" or "json"
-keep_recording = true     # false = auto-delete WAV after transcription
+keep_recording = true     # false = delete the audio after transcription
 
 [obsidian]
-enabled = true                # file every transcript into the vault as a categorized note
+enabled = true
 vault_dir = "~/Documents/obsidian/Personal"
-claude_bin = ""                # path to the claude CLI; empty = auto-detect via PATH
-confirm_before_filing = true  # show the proposed note and ask before writing (skipped when not a TTY)
+confirm_before_filing = true  # review the note before it's written
 ```
 
-**Precedence:** CLI flags > environment variables (`HF_TOKEN`, `OLLAMA_HOST`, `OPENAI_API_KEY`) > config file > defaults.
+Command-line flags win over environment variables (`HF_TOKEN`, `OLLAMA_HOST`, `OPENAI_API_KEY`), which win
+over the config file.
 
-## Summarization Templates
+**Speed and accuracy.** The Whisper model sets the trade-off. `large-v3` is the most accurate and the
+slowest. `mlx-community/whisper-large-v3-turbo` is a good middle ground: on a 17-minute meeting it brought
+processing from 5.2 to 2.7 minutes, with speaker identification running alongside.
 
-Built-in templates control how transcripts are summarized:
-
-| Template | Best for | Output style |
-|----------|----------|-------------|
-| `meeting` | Meetings, standups, 1:1s | Summary, Key Points, Action Items, Decisions |
-| `lecture` | Lectures, seminars, talks | Summary, Key Concepts, Key Takeaways |
-| `brief` | Quick overviews | 3-5 bullet points |
-
-Use `--template` on the CLI or set `template` in `[summarization]` config. Default is `meeting`.
-
-Define custom templates in config:
+**Templates.** `meeting` gives a summary, key points, action items and decisions. `lecture` gives a
+summary, key concepts and takeaways. `brief` gives 3–5 bullets. Define your own:
 
 ```toml
 [templates.my-standup]
@@ -328,95 +256,143 @@ system_prompt = "You summarize daily standups."
 prompt = "List each person's update:\n{transcript}"
 ```
 
-Then use with `--template my-standup` or `template = "my-standup"` in config.
+Long transcripts are summarized in overlapping chunks, and the parts are then merged under the same
+template.
 
-### Long meetings
+## Speaker identification
 
-Transcripts that do not fit the model's context window are summarized in overlapping chunks split on
-segment boundaries, and the partial notes are then merged into one summary under the same template —
-custom templates included. Shorter meetings are summarized in a single pass as before. Set
-`context_size` in `[summarization]` if a model's window should not be auto-detected; for the local
-backend it also sets the window the model is loaded with.
+Speaker identification uses pyannote and needs the Hugging Face token from [First run](#first-run). It
+runs on the GPU (MPS) at the same time as Whisper. Set `device = "cpu"` to avoid the GPU, but expect it to
+take about four times longer.
 
-This is separate from [Obsidian vault filing](#obsidian-vault-filing), which does its own summarization via Claude
-and isn't affected by `[summarization]` settings.
+Speakers start out as `SPEAKER_00`, `SPEAKER_01`, and so on. In Earshot you type names into the **Who's
+speaking?** fields above the transcript. In the terminal, ownscribe asks Claude for a one-line description
+of what each speaker did, then asks you for names. Names go into the transcript, the summary and the Obsidian note.
 
-## Speaker Diarization
+## Obsidian filing
 
-Speaker identification requires a HuggingFace token with access to the pyannote diarization model:
+With `[obsidian] enabled = true` and a `vault_dir`, each transcript can become a note in your vault:
 
-1. Accept the terms for [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) on HuggingFace
-2. Create a token at https://huggingface.co/settings/tokens
-3. Set `HF_TOKEN` env var or add `hf_token` to config
-4. Run with `--diarize`
-
-On Apple Silicon Macs, diarization automatically uses the Metal Performance Shaders (MPS) GPU backend for ~10x faster processing. Set `device = "cpu"` in the `[diarization]` config section to disable this.
-
-Diarization runs independently of transcription — it uses pyannote via PyTorch/MPS, unaffected by the MLX Whisper
-swap. When diarization ran, speaker turns are labeled `SPEAKER_00`, `SPEAKER_01`, etc. (anonymous IDs, not names)
-in `transcript.md`/`.json`, unless you name them interactively (see below).
-
-### Naming speakers
-
-After diarization, if `[diarization] ask_speaker_names = true` (the default) and you're at a TTY, ownscribe asks
-Claude for a one-sentence role blurb per speaker label — what they did/said in the meeting — then prompts you for a
-real name per speaker:
-
-```
---- Speaker identification ---
-SPEAKER_00 — Opened the meeting and walked through the Q3 budget numbers.
-  Name (blank to keep label): Alice
-SPEAKER_01 — Pushed back on the timeline and volunteered to own the migration.
-  Name (blank to keep label): Bob
-```
-
-Blank input keeps that speaker's label as-is — you can name some speakers and skip others. Names apply to
-`transcript.md`/`.json` on disk *and* the vault note (Claude writes the summary using the real names directly,
-rather than a find-and-replace afterward). This is skipped automatically when not diarizing, not at a TTY (e.g. a
-scripted `ownscribe resume`), or `ask_speaker_names = false`. It does not affect ownscribe's own local-LLM
-`summary.md`, which still uses `SPEAKER_XX` labels if summarization is enabled.
-
-## Obsidian Vault Filing
-
-After each transcript is produced — from a live recording, `ownscribe transcribe`, or `ownscribe resume` — ownscribe
-can automatically categorize, summarize, and file it into an Obsidian vault as a note. This runs in-process, right
-after `transcript.md`/`.json` is written; there's no separate watcher or background job.
-
-1. The transcript (with speaker labels, if diarization ran) is sent to a prompt template.
-2. `claude -p ... --allowedTools ""` runs headlessly (no tool access — it can only return text) to pick a category,
-   write a topic-based markdown summary with action items, and suggest a title and tags.
-3. If `confirm_before_filing = true` and you're at a TTY, the proposed title/category/tags/body are printed and you
-   confirm before anything is written.
-4. The note is written to `<vault_dir>/<category folder>/<date> <title>.md`, with frontmatter including
-   `source: transcript-pipeline` and `recorder: ownscribe`. Unrecognized categories fall back to `Meetings Inbox/`
+1. `claude -p` runs headless, with no tools (it can only return text). It picks a category, writes a
+   topic-based summary with action items, and suggests a title and tags.
+2. With `confirm_before_filing = true` you review the draft first. In Earshot you can edit it in a sheet;
+   in the terminal you confirm a printed preview.
+3. The note is written to `<vault_dir>/<category folder>/<date> <title>.md` with frontmatter
+   (`source: transcript-pipeline`, `recorder: ownscribe`). An unknown category lands in `Meetings Inbox/`
    with `status: "needs-review"`.
 
-The category list and folder mapping (`CATEGORY_TO_FOLDER` in `src/ownscribe/vault_filing.py`) are hardcoded to one
-person's vault taxonomy — edit that file to repoint the categories at your own vault structure. The prompt itself is
-seeded to `~/.config/ownscribe/vault_prompt_template.txt` on first run and can be edited there directly, the same
-way `config.toml` is.
+The categories and their folders are tailored to one vault (`CATEGORY_TO_FOLDER` in
+`src/ownscribe/vault_filing.py`), so edit them for yours. The prompt is copied to
+`~/.config/ownscribe/vault_prompt_template.txt` on first run, where you can change it. If filing fails,
+the transcript is never at risk: only the note is skipped.
 
-Failures here (network, auth, a malformed response) are always non-fatal — the transcript you already have is never
-at risk, only the vault-filing step is skipped with a warning.
+## The command-line tool
 
-Set `[obsidian] enabled = false` to turn this off entirely and keep ownscribe fully local.
+The backend works on its own in Terminal. The installer's copy runs with:
+
+```bash
+uv run --frozen --project ~/.local/share/earshot/ownscribe ownscribe
+```
+
+Or install it from a checkout:
+
+```bash
+git clone https://github.com/istiakshihab/ownscribe-personalized.git
+cd ownscribe-personalized
+bash swift/build.sh          # the capture helper, bin/ownscribe-audio
+uv sync --all-extras         # or: python3.12 -m venv .venv && source .venv/bin/activate && pip install -e '.[all]'
+```
+
+Recording from a terminal needs **Screen Recording** and **Microphone** permission for the terminal app:
+
+```bash
+open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+open "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+```
+
+Record, transcribe, summarize and file with one command. Press Ctrl+C to stop, or `m` to mute the mic
+while recording:
+
+```bash
+ownscribe
+```
+
+<p align="center">
+  <img src="docs/demo-pipeline.gif" alt="ownscribe in a terminal" width="700">
+</p>
+
+```bash
+ownscribe --no-mic                  # system audio only
+ownscribe --mic-device "MacBook Pro Microphone"
+ownscribe --diarize                 # identify speakers
+ownscribe --template lecture        # another summary template
+ownscribe --language en             # skip language detection
+ownscribe --silence-timeout 0       # don't stop on silence
+
+ownscribe transcribe meeting.mp4    # transcribe an audio or video file
+ownscribe summarize transcript.md   # summarize a transcript
+ownscribe resume ./2026-02-20_1736  # finish a partial run, or process a folder's recording
+ownscribe ask "What did Anna say about the deadline?"   # search your meetings
+ownscribe warmup                    # download the models ahead of a meeting
+ownscribe devices                   # also: apps, config, cleanup
+```
+
+`ask` first asks the summary model which meetings are relevant from their summaries. It then answers
+from their full transcripts, with quotes, and falls back to a keyword search when nothing matches.
+
+<p align="center">
+  <img src="docs/demo-ask.gif" alt="ownscribe ask" width="700">
+</p>
+
+Earshot drives the same backend through JSON-speaking commands, which you can use from your own tools too:
+
+```bash
+ownscribe session new --json                      # create a session folder
+ownscribe process SESSION --events-fd 3           # transcribe, identify speakers, summarize, with progress events
+ownscribe speakers SESSION --set SPEAKER_00=Alice # name speakers
+ownscribe resummarize SESSION --template brief    # summarize again
+ownscribe file SESSION --preview | --write        # Obsidian note
+ownscribe sessions --json                         # recordings and their status
+ownscribe doctor                                  # check ffmpeg, the token, claude, models, disk space
+```
+
+The protocol, including the capture helper's session mode and call watcher, is documented in
+[docs/engine-protocol.md](docs/engine-protocol.md).
+
+## Development
+
+```bash
+bash swift/build.sh              # capture helper → bin/ownscribe-audio
+bash app/build.sh                # Earshot → app/build/Earshot.app (only the Command Line Tools needed)
+uv run pytest                    # tests
+uv run ruff check src/ tests/    # lint
+```
+
+`scripts/mock_engine.py` fakes the capture helper and the backend, so the app can be worked on without
+audio, permissions or models. In Earshot, use Settings ▸ Backend ▸ Use mock engine.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [app/README.md](app/README.md) and
+[docs/engine-protocol.md](docs/engine-protocol.md).
 
 ## Acknowledgments
 
-ownscribe builds on some excellent open-source projects:
-
-- [MLX](https://github.com/ml-explore/mlx) / [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) — GPU-accelerated Whisper inference on Apple Silicon
-- [WhisperX](https://github.com/m-bain/whisperX) — audio loading and diarization glue (`DiarizationPipeline`, `assign_word_speakers`)
-- [pyannote.audio](https://github.com/pyannote/pyannote-audio) — speaker diarization
-- [llama.cpp](https://github.com/ggerganov/llama.cpp) / [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) — local LLM inference
-- [Ollama](https://ollama.ai) — local LLM serving
-- [Claude Code](https://github.com/anthropics/claude-code) — headless summarization/categorization for Obsidian vault filing
-- [Click](https://click.palletsprojects.com) — CLI framework
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, tests, and open contribution areas.
+- [ownscribe](https://github.com/paberr/ownscribe) by Pascal Berrang, which Earshot grew out of
+- [MLX](https://github.com/ml-explore/mlx) and
+  [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper): Whisper on the Apple GPU
+- [pyannote.audio](https://github.com/pyannote/pyannote-audio): speaker identification
+- [WhisperX](https://github.com/m-bain/whisperX): audio loading and diarization glue
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) and
+  [llama-cpp-python](https://github.com/abetlen/llama-cpp-python): local summaries
+- [Ollama](https://ollama.ai): local model serving
+- [Claude Code](https://github.com/anthropics/claude-code): Obsidian filing and the `claude` summary backend
+- [Click](https://click.palletsprojects.com): the command-line interface
 
 ## License
 
-MIT
+Earshot is free software: you can redistribute it and modify it under the terms of the
+[GNU General Public License](LICENSE), version 3 or (at your option) any later version. It comes with no
+warranty.
+
+Earshot is based on ownscribe, which Pascal Berrang released under the MIT License. As that license
+requires, its notice is kept in [NOTICE](NOTICE), and it still applies to the code that came from
+ownscribe.

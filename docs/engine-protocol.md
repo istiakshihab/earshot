@@ -286,7 +286,8 @@ when given one (the GUI passes an extra pipe as fd 3), and log human text to std
 | `ownscribe file SESSION --preview --json` / `--write [--edits FILE]` | Obsidian vault note: preview, then write |
 | `ownscribe sessions [--output-dir DIR] --json` | list sessions with stage status |
 | `ownscribe templates --json` | built-in and custom summary templates |
-| `ownscribe doctor --json` | ffmpeg, Hugging Face token, claude CLI, summarizer (`backend`, `model`), Obsidian vault (`enabled`, `vault_dir`, `vault_exists`, `confirm`), cached models, disk space |
+| `ownscribe doctor --json` | ffmpeg, Hugging Face token, claude CLI, summarizer (`backend`, `model`), Obsidian vault (`enabled`, `vault_dir`, `vault_exists`, `confirm`), the Whisper model (`whisper_model`: `model`, `cached`, and `choices`: `[{"model","cached"}]`, the models a picker offers), the step switches (`pipeline`: `diarize`, `summarize`, `template`), disk space |
+| `ownscribe config set SECTION.KEY VALUE [--if-missing] --json` | change one setting in `config.toml`: `{"ok", "key", "value", "previous", "changed", "path"}`; a bad key or value gives `{"ok": false, "code": "bad_setting", "message"}` and exit 64. `--if-missing` leaves a key the file already has |
 | `ownscribe warmup --events-fd N` | download and cache models, with progress |
 
 ### Job events (on `--events-fd`)
@@ -298,7 +299,7 @@ Every event has `"ev"` and `"ts"` (Unix time).
 | `job` | `command`, `session`, `status` (`started`, `done`, `failed`, `cancelled`) |
 | `stage` | `stage`, `parent`? (sub-steps), `status` (`running`, `done`, `failed`, `skipped`), `fraction`? (0–1), `detail`? |
 | `segment` | `start`, `end`, `text` — live while transcribing; no speakers yet |
-| `transcript` | `path`, `segments`: `[{"start","end","text","speaker"?}]`, `speakers`: labels |
+| `transcript` | `path`, `segments`: `[{"start","end","text","speaker"?}]`, `speakers`: labels, `model` (the Whisper model used; `process` only) |
 | `speakers` | `labels`, `names`, `roles` (suggestions; may be empty) |
 | `summary` | `template`, `title`, `text` (rendered with current names), `path` |
 | `session_moved` | `from`, `to` |
@@ -318,7 +319,14 @@ sub-steps `segmentation`, `speaker_counting`, `embeddings`, `clustering`, then `
 
 **When diarization fails** (pyannote can't load or crashes), `process` keeps the transcript without speakers:
 transcription is `done`, an `error` with `stage: "diarization"`, `code: "diarization_failed"` follows, and the
-job exits 2.
+job exits 2. `session.json` records the model each transcription used, in `stages.transcription.model` and
+`options.model`.
+
+**Settings.** The step switches (`[diarization] enabled`, `[summarization] enabled` and `template`, `[obsidian]
+enabled`) and `[transcription] model` live in `config.toml`, shared by the app and the terminal pipeline. A GUI
+reads them from `doctor` and changes them with `config set`, which keeps the file's comments, drops the trailing
+comment of a value it changes, writes atomically with the file's mode (600 for a new file), and makes a one-time
+`config.toml.bak`.
 
 Error codes include `audio_missing`, `audio_silent`, `ffmpeg_missing`, `hf_token_missing`,
 `transcription_failed`, `diarization_failed`, `summarizer_unavailable`, `summarization_failed`,

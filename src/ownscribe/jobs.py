@@ -91,12 +91,15 @@ def _write_transcript(path: Path, result: TranscriptResult, names: dict[str, str
     return out
 
 
-def _transcript_event(sink: EventSink, path: Path, result: TranscriptResult, names: dict[str, str]) -> None:
+def _transcript_event(
+    sink: EventSink, path: Path, result: TranscriptResult, names: dict[str, str], **extra: Any
+) -> None:
     labels = _distinct_labels(result)
     sink.emit(
         "transcript",
         path=str(path / "transcript.md"),
         speakers=labels,
+        **extra,
         segments=[
             {
                 "start": round(s.start, 3),
@@ -191,10 +194,12 @@ def process(
         "diarize": do_diarize,
         "summarize": do_summarize,
         "language": config.transcription.language or None,
+        "model": config.transcription.model,
     }
+    model = config.transcription.model
 
     # ---- transcription (+ diarization inside the transcriber)
-    sessions.set_stage(path, state, "transcription", "running")
+    sessions.set_stage(path, state, "transcription", "running", model=model)
     if do_diarize:
         sessions.set_stage(path, state, "diarization", "running")
     progress = EventProgress(sink, diarize=do_diarize, summarize=False)
@@ -217,7 +222,8 @@ def process(
             raise
         except Exception as exc:
             sessions.set_stage(
-                path, state, "transcription", "failed", error={"code": "transcription_failed", "message": str(exc)}
+                path, state, "transcription", "failed", model=model,
+                error={"code": "transcription_failed", "message": str(exc)},
             )
             raise JobError("transcription_failed", str(exc), "transcription") from exc
 
@@ -225,7 +231,7 @@ def process(
     state["speakers"] = {"labels": labels, "names": {}, "roles": {}}
     names: dict[str, str] = {}
     _write_transcript(path, result, names)
-    sessions.set_stage(path, state, "transcription", "done", segments=len(result.segments))
+    sessions.set_stage(path, state, "transcription", "done", segments=len(result.segments), model=model)
     # Speaker identification failing keeps the transcript, without speakers: only diarization fails.
     diarization_error = getattr(transcriber, "diarization_error", None) if do_diarize else None
     exit_code = 0
@@ -241,7 +247,7 @@ def process(
         sink.emit("speakers", labels=labels, names={}, roles={})
     else:
         sessions.set_stage(path, state, "diarization", "skipped")
-    _transcript_event(sink, path, result, names)
+    _transcript_event(sink, path, result, names, model=model)
 
     # ---- summarization
     if do_summarize:
@@ -543,11 +549,21 @@ def doctor(config: Config) -> dict[str, Any]:
     free = shutil.disk_usage(probe).free
     checks["disk"] = {"ok": free > 2 * 1024**3, "free_bytes": free, "path": str(out)}
     # Advisory: a missing model is downloaded on first use (or with `ownscribe warmup`).
+    from ownscribe.transcription.mlx_transcriber import MODEL_CHOICES
+
     checks["whisper_model"] = {
         "ok": True,
         "cached": _whisper_cached(config.transcription.model),
         "model": config.transcription.model,
         "required": False,
+        "choices": [{"model": m, "cached": _whisper_cached(m)} for m in MODEL_CHOICES],
+    }
+    # The step switches the app shows on its cards (shared with the terminal pipeline).
+    checks["pipeline"] = {
+        "ok": True,
+        "diarize": config.diarization.enabled,
+        "summarize": config.summarization.enabled,
+        "template": config.summarization.template or "meeting",
     }
     return {"ok": all(c["ok"] for c in checks.values()), "checks": checks}
 

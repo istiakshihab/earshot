@@ -63,6 +63,12 @@ struct DoctorReport: Sendable {
     var outputDir: String?
     var whisperModel: String?
     var whisperCached = true
+    /// The models the Transcription card offers, and whether each is downloaded.
+    var modelChoices: [PipelineSettings.ModelChoice] = []
+    /// The step switches in config.toml (`[diarization] enabled`, `[summarization] enabled` and `template`).
+    var diarize: Bool?
+    var summarize: Bool?
+    var template: String?
     /// `[summarization] backend` and model, e.g. ("claude", "sonnet") or ("local", "phi-4-mini").
     var summarizerBackend: String?
     var summarizerModel: String?
@@ -184,6 +190,14 @@ enum Tools {
             if let w = check("whisper_model") {
                 report.whisperModel = w.string("model")
                 report.whisperCached = w.bool("cached") ?? true
+                report.modelChoices = w.objects("choices").compactMap { c in
+                    c.string("model").map { PipelineSettings.ModelChoice(model: $0, cached: c.bool("cached") ?? false) }
+                }
+            }
+            if let p = check("pipeline") {
+                report.diarize = p.bool("diarize")
+                report.summarize = p.bool("summarize")
+                report.template = p.string("template")
             }
             if let v = check("obsidian") {
                 report.vault = .init(enabled: v.bool("enabled") ?? false, dir: v.string("vault_dir") ?? "",

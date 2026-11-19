@@ -98,6 +98,21 @@ _MLX_MODEL_REPOS = {
     "large-v3": "mlx-community/whisper-large-v3-mlx",
 }
 
+# What Earshot's model picker offers: the sizes above plus MLX conversions known to load with mlx-whisper
+# 0.4.x. (The turbo "-8bit"/"-4bit" conversions use a model.safetensors layout it can't load.) Any other repo
+# id or local path still works as [transcription] model.
+MODEL_CHOICES = (
+    "tiny",
+    "base",
+    "small",
+    "medium",
+    "large-v3",
+    "mlx-community/whisper-large-v3-mlx-8bit",
+    "mlx-community/whisper-large-v3-turbo",
+    "mlx-community/whisper-large-v3-turbo-q4",
+    "mlx-community/distil-whisper-large-v3",
+)
+
 
 class MLXWhisperTranscriber(Transcriber):
     """Transcribes audio using MLX Whisper (Apple GPU) with optional pyannote diarization."""

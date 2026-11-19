@@ -152,8 +152,10 @@ From a checkout, `bash install.sh` builds and installs that checkout instead.
 1. **Record.** Press **Record** (⌘R). Pick the mic, add apps as their own sources with **Add source**, and
    set the levels in the mixer while it records.
 2. **Stop.** Press **Stop** (⌘R) and the recording is saved. Processing then starts: transcription,
-   speaker identification and a summary, each shown on its own card. Speaker identification and the
-   summary can be switched off.
+   speaker identification and a summary, each shown on its own card. Speaker identification, the
+   summary and Obsidian filing have switches, and the menu under Transcription picks the Whisper model.
+   These are saved in `config.toml`, so the terminal tool uses the same ones. A finished card shows the
+   model it used, and **Transcribe Again…** re-runs a recording with the current one.
 3. **Name the speakers** in the **Who's speaking?** fields above the transcript. The transcript and summary
    update with the names.
 4. **File to Obsidian** if it's set up. Earshot drafts the note, and you can edit the title, category,

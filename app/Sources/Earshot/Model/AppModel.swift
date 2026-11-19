@@ -20,8 +20,11 @@ final class AppModel {
     var doctor: DoctorReport? {
         didSet {
             for p in [pipeline] + Array(openPipelines.values) { p.vaultSettings = doctor?.vault }
+            if let doctor { settings.apply(doctor) }
         }
     }
+    /// The step switches and Whisper model (config.toml), shared by every panel.
+    let settings = PipelineSettings()
 
     /// What the window shows: the recorder, or a past recording picked in the sidebar.
     enum Selection: Hashable {
@@ -45,6 +48,9 @@ final class AppModel {
         recorder.tools = { try Self.resolveTools() }
         recorder.outputDir = { [weak self] in self?.outputDirArgument }
         pipeline.ownscribe = { try Self.resolveTools().ownscribe }
+        settings.ownscribe = { try Self.resolveTools().ownscribe }
+        settings.onChanged = { [weak self] in Task { await self?.refreshDoctor() } }
+        pipeline.settings = settings
         pipeline.onJobFinished = { [weak self] in self?.refreshHistory() }
         recorder.onRecordingStarted = { [weak self] in
             guard let self else { return }
@@ -177,6 +183,7 @@ final class AppModel {
     private func makePipeline() -> PipelineModel {
         let p = PipelineModel()
         p.ownscribe = { try Self.resolveTools().ownscribe }
+        p.settings = settings
         p.templates = pipeline.templates
         p.vaultSettings = doctor?.vault
         p.onJobFinished = { [weak self] in self?.refreshHistory() }
@@ -227,6 +234,7 @@ final class AppModel {
     func launch() async {
         await updateMeetingWatcher()
         await refreshDoctor()
+        if let doctor { await settings.migrateAppSwitches(using: doctor) }
         refreshHistory()
         await recorder.refreshDevices()
         if let tool = try? Self.resolveTools().ownscribe {
@@ -261,6 +269,7 @@ final class AppModel {
             out.append(.init(id: "meeting", text: "\(m.name) call started. Record it?", kind: .info, action: .recordMeeting))
         }
         if let doctorError { out.append(.init(id: "doctor-error", text: doctorError, kind: .error, action: .settings)) }
+        if let e = settings.lastError { out.append(.init(id: "settings", text: e, kind: .error, action: .dismiss)) }
         for p in doctor?.problems ?? [] where !dismissedProblems.contains(p.id) {
             out.append(.init(id: "doctor-\(p.id)", text: p.message, kind: p.isWarning ? .warning : .error,
                              action: p.id == "hf_token" ? .huggingFace : .recheck))
@@ -289,6 +298,7 @@ final class AppModel {
 
     func dismiss(_ banner: Banner) {
         if banner.id == "meeting" { dismissMeeting() }
+        if banner.id == "settings" { settings.lastError = nil }
         if banner.id.hasPrefix("doctor-") { dismissedProblems.insert(String(banner.id.dropFirst(7))) }
         if banner.id == "recorder" { recorder.lastError = nil; recorder.recoverablePath = nil }
         if banner.id == "pipeline" { pipeline.lastError = nil }

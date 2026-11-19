@@ -10,6 +10,9 @@ struct PipelinePanel: View {
     /// Shown on the right while nothing runs.
     var hint = "Runs on this Mac when you press Stop"
     @ViewState private var tab = Tab.transcript
+    @ViewState private var confirmingTranscribeAgain = false
+    @ViewState private var choosingOtherModel = false
+    @ViewState private var otherModel = ""
 
     /// Room for the widest card's title beside its switch (Summarization) and the template picker.
     static let stagesWidth: CGFloat = 214
@@ -61,12 +64,91 @@ struct PipelinePanel: View {
         StageCard(title: "Transcription", status: pipeline.transcription.status, off: false, accessory: {
             EmptyView()
         }) {
-            Text(whisperLabel).font(.system(size: 12)).foregroundStyle(Theme.ink3).lineLimit(1).help(whisperLabel)
+            modelMenu
             ProgressBar(fraction: pipeline.preparingModels ? nil : (pipeline.transcription.status == .done ? 1 : pipeline.transcription.fraction ?? 0),
                         indeterminate: pipeline.preparingModels)
                 .accessibilityLabel("Transcription progress")
             Text(pipeline.transcriptionFoot).font(.system(size: 12)).foregroundStyle(Theme.ink2).lineLimit(2).help(pipeline.transcriptionFoot).monospacedDigit()
+            if canTranscribeAgain {
+                Button("Transcribe Again…") { confirmingTranscribeAgain = true }
+                    .controlSize(.small)
+                    .help("Transcribe this recording again with \(modelLabel)")
+            }
         }
+        .alert("Transcribe again with \(modelLabel)?", isPresented: $confirmingTranscribeAgain) {
+            Button("Transcribe Again") {
+                if let path = pipeline.sessionPath { pipeline.process(session: path) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(transcribeAgainMessage)
+        }
+        .alert("Other Whisper model", isPresented: $choosingOtherModel) {
+            TextField("mlx-community/…", text: $otherModel)
+            Button("Use Model") { pipeline.settings.setModel(otherModel) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("A Hugging Face repo id of an MLX Whisper conversion, or a local folder.")
+        }
+    }
+
+    /// The Whisper model, as a menu: `[transcription] model` in config.toml, used by the next transcription.
+    private var modelMenu: some View {
+        let settings = pipeline.settings
+        let current = settings.model
+        var choices = settings.modelChoices
+        if let current, !choices.contains(where: { $0.model == current }) {
+            choices.append(.init(model: current, cached: settings.modelCached))
+        }
+        return Menu {
+            // An inline picker, so the current model gets the menu's own checkmark.
+            Picker("Whisper model", selection: Binding(get: { current ?? "" }, set: { settings.setModel($0) })) {
+                ForEach(choices) { choice in
+                    Text(PipelineSettings.label(for: choice.model) + (choice.cached ? "" : " · downloads on first use"))
+                        .tag(choice.model)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+            Divider()
+            Button("Other…") {
+                otherModel = current ?? ""
+                choosingOtherModel = true
+            }
+        } label: {
+            Text(modelSubtitle).font(.system(size: 12)).lineLimit(1)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.visible)
+        .foregroundStyle(Theme.ink3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .disabled(pipeline.isRunning || current == nil)
+        .help("Whisper model for the next transcription · [transcription] model in config.toml")
+        .accessibilityLabel("Whisper model: \(modelLabel)")
+    }
+
+    private var modelLabel: String {
+        pipeline.settings.model.map(PipelineSettings.label(for:)) ?? "Whisper"
+    }
+
+    private var modelSubtitle: String {
+        guard pipeline.settings.model != nil else { return "Whisper · on this Mac" }
+        return modelLabel + (pipeline.settings.modelCached ? "" : " · downloads on first use")
+    }
+
+    private var canTranscribeAgain: Bool {
+        guard pipeline.hasRun, !pipeline.isRunning, let path = pipeline.sessionPath else { return false }
+        guard [.done, .failed, .cancelled].contains(pipeline.transcription.status) else { return false }
+        return FileManager.default.fileExists(atPath: path + "/recording.wav")
+    }
+
+    private var transcribeAgainMessage: String {
+        var replaced = ["the transcript"]
+        if pipeline.summary != nil { replaced.append("the summary") }
+        var text = "This replaces \(replaced.joined(separator: " and "))."
+        if !pipeline.names.isEmpty { text += " The speaker names you've entered are cleared." }
+        if pipeline.vaultNote != nil { text += " The note already filed in Obsidian isn't changed." }
+        return text
     }
 
     private var diarizationCard: some View {
@@ -126,7 +208,10 @@ struct PipelinePanel: View {
 
     private var vaultCard: some View {
         StageCard(title: "Obsidian", status: pipeline.vault.status, off: pipeline.vaultOff, accessory: {
-            EmptyView()
+            Toggle("Obsidian", isOn: Binding(get: { pipeline.settings.obsidian }, set: { pipeline.settings.setObsidian($0) }))
+                .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                .disabled(pipeline.vault.status == .running)
+                .help("File recordings into your Obsidian vault · [obsidian] enabled in config.toml")
         }) {
             Text(vaultSubtitle).font(.system(size: 12)).foregroundStyle(Theme.ink3).lineLimit(1)
                 .help(vaultHelp)
@@ -166,15 +251,6 @@ struct PipelinePanel: View {
         guard let settings = pipeline.vaultSettings else { return "Files the recording into your Obsidian vault" }
         return settings.asks ? "[obsidian] confirm_before_filing = true: you see the note before it's filed"
                              : "[obsidian] confirm_before_filing = false: filed as soon as the transcript is ready"
-    }
-
-    private var whisperLabel: String {
-        guard let model = app.doctor?.whisperModel else { return "Whisper · on this Mac" }
-        var name = model.split(separator: "/").last.map(String.init) ?? model
-        name = name.replacingOccurrences(of: "-mlx", with: "")
-        name = name.replacingOccurrences(of: "whisper-", with: "Whisper ")
-        for bits in ["8bit", "4bit"] { name = name.replacingOccurrences(of: "-\(bits)", with: " · \(bits.dropLast(3))-bit") }
-        return name + (app.doctor?.whisperCached == false ? " · downloads on first use" : "")
     }
 
     // MARK: Results

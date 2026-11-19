@@ -67,9 +67,22 @@ final class PipelineModel {
     var vaultNote: VaultNote?
     var reviewingVault = false
 
-    var diarizeOn = Prefs.bool(Prefs.diarize) { didSet { Prefs.defaults.set(diarizeOn, forKey: Prefs.diarize) } }
-    var summarizeOn = Prefs.bool(Prefs.summarize) { didSet { Prefs.defaults.set(summarizeOn, forKey: Prefs.summarize) } }
-    var template = Prefs.string(Prefs.template) { didSet { Prefs.defaults.set(template, forKey: Prefs.template) } }
+    /// The switches and the model, shared by every recording's panel and with the terminal (config.toml).
+    @ObservationIgnored var settings = PipelineSettings()
+    var diarizeOn: Bool {
+        get { settings.diarize }
+        set { settings.setDiarize(newValue) }
+    }
+    var summarizeOn: Bool {
+        get { settings.summarize }
+        set { settings.setSummarize(newValue) }
+    }
+    var template: String {
+        get { settings.template }
+        set { settings.setTemplate(newValue) }
+    }
+    /// The Whisper model this recording was transcribed with (`model` in session.json), when known.
+    var usedModel: String?
 
     @ObservationIgnored var ownscribe: () throws -> ToolCommand = { throw NSError(domain: "ownscribe", code: 1) }
     /// After every job, so the history list can pick up new titles, summaries and notes.
@@ -116,6 +129,7 @@ final class PipelineModel {
         summary = nil
         summaryUnseen = false
         lastError = nil
+        usedModel = nil
         vault = Stage()
         vaultDraft = nil
         vaultNote = nil
@@ -264,6 +278,8 @@ final class PipelineModel {
         let state = read("session.json").flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
 
         let options = state["options"] as? [String: Any] ?? [:]
+        usedModel = ((state["stages"] as? [String: Any])?["transcription"] as? [String: Any])?["model"] as? String
+            ?? options["model"] as? String
         ranDiarize = (options["diarize"] as? Bool) ?? true
         ranSummarize = (options["summarize"] as? Bool) ?? true
         let stages = state["stages"] as? [String: Any] ?? [:]
@@ -335,7 +351,7 @@ final class PipelineModel {
         guard hasRun, let path = sessionPath, transcription.status == .done, !segments.isEmpty else { return false }
         return FileManager.default.fileExists(atPath: (path as NSString).appendingPathComponent("transcript.json"))
     }
-    var vaultOff: Bool { !(vaultSettings?.enabled ?? false) || !(vaultSettings?.exists ?? false) }
+    var vaultOff: Bool { !settings.obsidian || !(vaultSettings?.exists ?? false) }
 
     private var hasUncommittedNames: Bool {
         labels.contains { label in
@@ -425,7 +441,7 @@ final class PipelineModel {
 
     var vaultFoot: String {
         guard let settings = vaultSettings else { return "Checking the vault…" }
-        if !settings.enabled { return "Off · [obsidian] enabled = false" }
+        if !self.settings.obsidian { return "Off" }
         if !settings.exists { return "Vault not found: \(settings.dir.abbreviatingHome)" }
         if let note = vaultNote {
             let folder = note.folder(in: settings.dir)
@@ -496,6 +512,7 @@ final class PipelineModel {
                         text: (s.string("text") ?? "").trimmingCharacters(in: .whitespaces), speaker: s.string("speaker"))
             }
             segmentCounter += list.count
+            if let model = e.string("model") { usedModel = model }
             let speakers = e.strings("speakers")
             if !speakers.isEmpty {
                 labels = speakers
@@ -649,7 +666,9 @@ final class PipelineModel {
         case .running:
             if preparingModels { return "Preparing models…" }
             return transcription.fraction.map { "\(Int(($0 * 100).rounded()))%" } ?? "Starting…"
-        case .done: return "Done · \(segments.count) segment\(segments.count == 1 ? "" : "s")"
+        case .done:
+            let done = "Done · \(segments.count) segment\(segments.count == 1 ? "" : "s")"
+            return usedModel.map { done + " · " + PipelineSettings.label(for: $0) } ?? done
         case .failed: return transcription.message ?? "Failed"
         case .skipped: return "Skipped"
         case .cancelled: return "Cancelled"

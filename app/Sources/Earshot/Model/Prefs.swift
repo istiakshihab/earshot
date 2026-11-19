@@ -7,9 +7,12 @@ enum Prefs {
     static let outputDir = "outputDir"          // "" = ownscribe's [output] dir
     static let recentDirs = "recentDirs"
     static let micChoice = "micChoice"          // "auto" or "device:<uid>"
+    // The step switches used to live here; they're in config.toml now (PipelineSettings). These keys are
+    // only read once, to carry an existing app's values over.
     static let diarize = "diarize"
     static let summarize = "summarize"
     static let template = "template"
+    static let switchesMigrated = "switchesMigrated"
     static let settingsTab = "settingsTab"   // backend | huggingface | meetings
     static let sidebarVisible = "sidebarVisible"
     static let detectMeetings = "detectMeetings"        // watch for Zoom and Teams calls

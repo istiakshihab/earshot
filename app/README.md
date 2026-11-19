@@ -16,13 +16,20 @@ The window opens sized to the screen and only the transcript and summary scroll.
   Diarization/Summarization switches. Speaker names run `ownscribe speakers DIR --set SPEAKER_00=Name`;
   a template change after a summary runs `ownscribe resummarize DIR --template T`. Cancel sends SIGTERM.
   If speaker identification fails, the transcript is kept without speakers and only Diarization fails.
+- **Settings on the cards:** the Diarization, Summarization and Obsidian switches, the summary template
+  and the Whisper model (the menu under Transcription) are kept in `config.toml`, so the terminal
+  `ownscribe` uses the same ones. Changing one runs `ownscribe config set SECTION.KEY VALUE`, which keeps
+  the file's comments. The model menu lists models known to work, marks the ones that still need
+  downloading, and takes any other MLX Whisper repo id under **Other…**. When a recording is done, its card
+  shows the model it was transcribed with, and **Transcribe Again…** runs it again with the current model
+  (it says what will be replaced first; speaker names are cleared).
 - **Obsidian:** the fourth card files the recording into the vault, following `[obsidian]` in
   config.toml. With `confirm_before_filing = true` (the default) it waits for you: **File to Obsidian…**
   runs `ownscribe file DIR --preview` (Claude drafts the note with the speaker names entered so far) and
   opens a sheet to edit the title, category (which picks the vault folder), tags and text; **File Note**
   runs `ownscribe file DIR --write --edits DIR/vault-edits.json`. With `confirm_before_filing = false` it
   drafts and writes right after processing, like the terminal pipeline. **Open in Obsidian** opens the
-  note. `enabled = false` or a missing `vault_dir` turns the card off.
+  note. The card's switch (`[obsidian] enabled`) or a missing `vault_dir` turns it off.
 - **History:** the sidebar lists every recording in the save folder by date (Today, Yesterday, Previous
   7 Days, Previous 30 Days, then by month), with search, read straight from the session folders (title from
   session.json, or the slug older recordings carry in their folder name). Opening one loads its stage results,

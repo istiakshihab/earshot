@@ -258,13 +258,41 @@ def apps() -> None:
     click.echo(recorder.list_apps())
 
 
-@cli.command("config")
-def config_cmd() -> None:
-    """Open the configuration file in your editor."""
+@cli.group("config", invoke_without_command=True)
+@click.pass_context
+def config_cmd(ctx: click.Context) -> None:
+    """Open the configuration file in your editor (or change one setting with `config set`)."""
+    if ctx.invoked_subcommand is not None:
+        return
     path = ensure_config_file()
     editor = os.environ.get("EDITOR", "nano")
     click.echo(f"Opening {path} with {editor}...")
     subprocess.run([editor, str(path)])
+
+
+@config_cmd.command("set")
+@click.argument("key")
+@click.argument("value")
+@click.option("--if-missing", is_flag=True, help="Leave the setting alone if the file already has it.")
+@click.option("--json", "as_json", is_flag=True, help="Print the result as JSON.")
+def config_set_cmd(key: str, value: str, if_missing: bool, as_json: bool) -> None:
+    """Set SECTION.KEY to VALUE in config.toml, keeping its comments (e.g. `transcription.model small`)."""
+    from ownscribe.config_write import ConfigWriteError, set_value
+    from ownscribe.jobs import dumps
+
+    try:
+        result = set_value(key, value, if_missing=if_missing)
+    except ConfigWriteError as exc:
+        if as_json:
+            click.echo(dumps({"ok": False, "code": "bad_setting", "message": str(exc)}))
+            raise SystemExit(64) from None
+        raise click.BadParameter(str(exc), param_hint="KEY/VALUE") from None
+    if as_json:
+        click.echo(dumps({"ok": True, **result}))
+    elif result["changed"]:
+        click.echo(f"{key} = {result['value']!r}")
+    else:
+        click.echo(f"{key} is already {result['value']!r}")
 
 
 @cli.command()

@@ -28,6 +28,7 @@ its capture helper at this script (`mock_engine.py [--speed N] <command> ...`):
     speakers SESSION --set SPEAKER_00=Name ... --events-fd 3
     resummarize SESSION --template T --events-fd 3
     file SESSION --preview|--write [--edits FILE] --events-fd 3   # never touches a real vault
+    config set SECTION.KEY VALUE [--if-missing] --json   # kept in $TMPDIR/ownscribe-mock/config.json
     doctor --json · templates --json
 
 Jobs touch the session folder only if it exists: `process` writes session.json and summary.raw.md and
@@ -37,6 +38,7 @@ renames the folder after the title, like the real job. Standard library only.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import os
@@ -468,9 +470,11 @@ def run_process(args: argparse.Namespace) -> int:
     else:
         emit("stage", stage="diarizing", status="skipped")
 
-    emit("transcript", path=f"{session}/transcript.md", segments=_segments(labels, {}), speakers=labels)
+    model = _mock_config()["transcription.model"]
+    emit("transcript", path=f"{session}/transcript.md", segments=_segments(labels, {}), speakers=labels, model=model)
     state = {"speakers": {"labels": labels, "names": {}, "roles": roles}, "summary": None,
-             "options": {"template": args.template}}
+             "options": {"template": args.template, "model": model},
+             "stages": {"transcription": {"status": "done", "model": model}}}
     _save_state(session, state)
 
     moved_to = session
@@ -547,6 +551,57 @@ def _vault_mode() -> str:
     return mode if mode in ("ask", "auto", "off") else "ask"
 
 
+# `config set` writes here instead of ~/.config/ownscribe/config.toml; doctor and process read it back.
+MODEL_CHOICES = [
+    "tiny", "base", "small", "medium", "large-v3", "mlx-community/whisper-large-v3-mlx-8bit",
+    "mlx-community/whisper-large-v3-turbo", "mlx-community/whisper-large-v3-turbo-q4",
+    "mlx-community/distil-whisper-large-v3",
+]
+MOCK_CACHED = {"base", "mlx-community/whisper-large-v3-turbo"}
+
+
+def _mock_config_path() -> Path:
+    import tempfile
+
+    return Path(tempfile.gettempdir()) / "ownscribe-mock" / "config.json"
+
+
+def _mock_config() -> dict:
+    values = {
+        "transcription.model": "base",
+        "diarization.enabled": True,
+        "summarization.enabled": True,
+        "summarization.template": "meeting",
+        "obsidian.enabled": _vault_mode() != "off",
+    }
+    with contextlib.suppress(OSError, json.JSONDecodeError):
+        values.update(json.loads(_mock_config_path().read_text()))
+    return values
+
+
+def run_config_set(args: argparse.Namespace) -> int:
+    section, _, name = args.key.partition(".")
+    if not section or not name:
+        print(json.dumps({"ok": False, "code": "bad_setting", "message": f"Expected SECTION.KEY, got {args.key!r}"}))
+        return 64
+    text = args.value.strip().lower()
+    value = True if text in ("true", "yes", "on", "1") else False if text in ("false", "no", "off", "0") else args.value
+    path = _mock_config_path()
+    try:
+        stored = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        stored = {}
+    previous = _mock_config().get(args.key)
+    changed = not (args.if_missing and args.key in stored) and previous != value
+    if changed:
+        stored[args.key] = value
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(stored, indent=2))
+    print(json.dumps({"ok": True, "key": args.key, "value": value if changed else previous, "previous": previous,
+                      "changed": changed, "path": str(path)}))
+    return 0
+
+
 def run_file(args: argparse.Namespace) -> int:
     emit, close = _emitter(args.events_fd)
     speed = max(0.05, args.speed)
@@ -606,15 +661,21 @@ def run_session_new(args: argparse.Namespace) -> int:
 def run_doctor(_args: argparse.Namespace) -> int:
     import tempfile
 
+    cfg = _mock_config()
     checks = {
         "ffmpeg": {"ok": True, "path": "/opt/homebrew/bin/ffmpeg"},
         "hf_token": {"ok": True, "set": True, "needed": True},
         "claude": {"ok": True, "path": "/usr/local/bin/claude"},
         "capture_helper": {"ok": True, "path": __file__, "session_mode": True},
         "disk": {"ok": True, "free_bytes": 50 * 1024**3, "path": str(Path(tempfile.gettempdir()) / "ownscribe-mock")},
-        "whisper_model": {"ok": True, "cached": False, "model": "mock-whisper", "required": False},
+        "whisper_model": {"ok": True, "cached": cfg["transcription.model"] in MOCK_CACHED,
+                          "model": cfg["transcription.model"], "required": False,
+                          "choices": [{"model": m, "cached": m in MOCK_CACHED} for m in MODEL_CHOICES]},
+        "pipeline": {"ok": True, "diarize": cfg["diarization.enabled"], "summarize": cfg["summarization.enabled"],
+                     "template": cfg["summarization.template"]},
         "summarizer": {"ok": True, "backend": "claude", "model": "sonnet"},
-        "obsidian": {"ok": True, "enabled": _vault_mode() != "off", "vault_dir": str(Path(MOCK_VAULT).expanduser()),
+        "obsidian": {"ok": True, "enabled": bool(cfg["obsidian.enabled"]),
+                     "vault_dir": str(Path(MOCK_VAULT).expanduser()),
                      "vault_exists": True, "confirm": _vault_mode() != "auto"},
     }
     print(json.dumps({"ok": True, "checks": checks}, indent=2))
@@ -647,6 +708,13 @@ def main() -> int:
     watch.add_argument("--speed", type=float, default=1.0, help="time scale for OWNSCRIBE_MOCK_MEETING")
     for name in ("list-apps", "list-devices", "doctor", "templates"):
         sub.add_parser(name).add_argument("--json", action="store_true")
+
+    config = sub.add_parser("config").add_subparsers(dest="config_cmd", required=True)
+    cset = config.add_parser("set")
+    cset.add_argument("key")
+    cset.add_argument("value")
+    cset.add_argument("--if-missing", action="store_true")
+    cset.add_argument("--json", action="store_true")
 
     session = sub.add_parser("session").add_subparsers(dest="session_cmd", required=True)
     new = session.add_parser("new")
@@ -705,6 +773,8 @@ def main() -> int:
         return 0
     if args.mode == "session":
         return run_session_new(args)
+    if args.mode == "config":
+        return run_config_set(args)
     if args.mode == "doctor":
         return run_doctor(args)
     if args.mode == "templates":

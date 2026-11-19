@@ -415,6 +415,36 @@ class TestSpeakersAndSummary:
         [(ev, fields)] = events
         assert ev == "vault_preview" and fields["destination"] == "Meetings Inbox" and fields["title"] == "?"
 
+    def test_doctor_reports_the_switches_and_model_choices(self, config, tmp_path, monkeypatch):
+        from ownscribe.transcription.mlx_transcriber import MODEL_CHOICES
+
+        monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path))
+        (tmp_path / "models--mlx-community--whisper-small-mlx").mkdir()
+        config.transcription.model = "small"
+        config.summarization.enabled = False
+        config.summarization.template = ""
+        with mock.patch("ownscribe.claude_cli.resolve_claude_bin", return_value="/bin/claude"), \
+             mock.patch("ownscribe.audio.coreaudio._find_binary", return_value=None):
+            checks = jobs.doctor(config)["checks"]
+
+        assert checks["pipeline"] == {"ok": True, "diarize": True, "summarize": False, "template": "meeting"}
+        model = checks["whisper_model"]
+        assert model["model"] == "small" and model["cached"] is True
+        assert [c["model"] for c in model["choices"]] == list(MODEL_CHOICES)
+        assert [c["model"] for c in model["choices"] if c["cached"]] == ["small"]
+
+    def test_process_records_the_model(self, config, session_dir):
+        config.transcription.model = "mlx-community/whisper-large-v3-turbo"
+        pipe = EventPipe()
+        with fakes():
+            jobs.process(config, session_dir, sink=pipe.sink, summarize=False)
+        state = sessions.load(session_dir)
+        transcript = next(e for e in pipe.events() if e["ev"] == "transcript")
+
+        assert transcript["model"] == "mlx-community/whisper-large-v3-turbo"
+        assert state["stages"]["transcription"]["model"] == "mlx-community/whisper-large-v3-turbo"
+        assert state["options"]["model"] == "mlx-community/whisper-large-v3-turbo"
+
     def test_doctor_reports_the_vault(self, config, tmp_path):
         vault = tmp_path / "vault"
         config.obsidian.vault_dir = str(vault)

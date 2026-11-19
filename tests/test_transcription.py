@@ -468,28 +468,57 @@ class TestParallelDiarization:
         assert transcribing == [False]
         assert result.segments[0].speaker == "SPEAKER_00"
 
-    def test_a_diarization_error_reaches_the_caller(self):
+    def _transcribe_with(self, load=None, *, parallel=True):
+        """Transcribe one segment with the given diarization pipeline loader (fakes everything else)."""
         import numpy as np
-        import pytest
 
         from ownscribe.config import DiarizationConfig, TranscriptionConfig
         from ownscribe.transcription.mlx_transcriber import MLXWhisperTranscriber
 
+        fake_whisperx = types.SimpleNamespace(load_audio=lambda _p: np.zeros(16000, dtype=np.float32))
+        fake_mlx = types.SimpleNamespace(transcribe=lambda *_a, **_k: {
+            "segments": [{"text": "hi", "start": 0.0, "end": 1.0, "words": []}], "language": "en"})
+        diar = DiarizationConfig(enabled=True, hf_token="hf_x", device="cpu", parallel=parallel)
+        progress = _FakeProgressKw()
+        transcriber = MLXWhisperTranscriber(TranscriptionConfig(language="en"), diar, progress=progress)
+        transcriber._model_loaded = True
+        with (
+            mock.patch.dict("sys.modules", {"whisperx": fake_whisperx, "mlx_whisper": fake_mlx}),
+            mock.patch.object(transcriber, "_load_diarization_pipeline", side_effect=load),
+        ):
+            result = transcriber._transcribe_inner(mock.MagicMock())
+        return result, transcriber, progress
+
+    def test_a_diarization_error_keeps_the_transcript(self):
         class Broken:
             def model(self, *_a, **_k):
                 raise RuntimeError("pyannote exploded")
 
-        fake_whisperx = types.SimpleNamespace(load_audio=lambda _p: np.zeros(16000, dtype=np.float32))
-        fake_mlx = types.SimpleNamespace(transcribe=lambda *_a, **_k: {"segments": [], "language": "en"})
-        diar = DiarizationConfig(enabled=True, hf_token="hf_x", device="cpu", parallel=True)
-        transcriber = MLXWhisperTranscriber(TranscriptionConfig(language="en"), diar, progress=_FakeProgressKw())
-        transcriber._model_loaded = True
-        with (
-            mock.patch.dict("sys.modules", {"whisperx": fake_whisperx, "mlx_whisper": fake_mlx}),
-            mock.patch.object(transcriber, "_load_diarization_pipeline", return_value=Broken()),
-            pytest.raises(RuntimeError, match="pyannote exploded"),
-        ):
-            transcriber._transcribe_inner(mock.MagicMock())
+        for parallel in (True, False):
+            result, transcriber, progress = self._transcribe_with(lambda **_k: Broken(), parallel=parallel)
+            assert [s.text for s in result.segments] == ["hi"]
+            assert result.segments[0].speaker is None
+            assert str(transcriber.diarization_error) == "pyannote exploded"
+            assert ("fail", "diarizing") in progress.calls
+
+    def test_a_pipeline_that_cannot_load_keeps_the_transcript(self):
+        def no_access(**_k):
+            raise RuntimeError("403 Client Error: gated repo")
+
+        result, transcriber, progress = self._transcribe_with(no_access)
+        assert [s.text for s in result.segments] == ["hi"]
+        assert "gated repo" in str(transcriber.diarization_error)
+        assert ("fail", "diarizing") in progress.calls
+
+    def test_cancelling_during_diarization_still_cancels(self):
+        import pytest
+
+        class Interrupted:
+            def model(self, *_a, **_k):
+                raise KeyboardInterrupt
+
+        with pytest.raises(KeyboardInterrupt):
+            self._transcribe_with(lambda **_k: Interrupted())
 
 
 class _FakeProgressKw(_FakeProgress):

@@ -656,6 +656,12 @@ def _do_transcribe_and_summarize(
     # --- All user-facing output (and any interactive prompts, and retries)
     # happen after the TUI exits: both the live-rendering checklist and a
     # click.confirm() prompt fight over the terminal if run concurrently. ---
+    diarization_error = getattr(transcriber, "diarization_error", None)
+    if diarization_error is not None:
+        click.echo(
+            f"Warning: speaker identification failed, so the transcript has no speakers: {diarization_error}",
+            err=True,
+        )
     name_mapping: dict[str, str] = {}
     if identify_speakers and result.has_speakers:
         from ownscribe.speaker_naming import apply_speaker_names, get_speaker_roles, prompt_for_names

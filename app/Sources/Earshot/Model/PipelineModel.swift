@@ -536,8 +536,9 @@ final class PipelineModel {
             sawError = true
             let message = e.string("message") ?? e.string("code") ?? "Error"
             let friendly = Self.friendly(code: e.string("code"), message: message)
-            // Diarization runs inside the transcriber, so a pyannote failure arrives as a transcription
-            // error, and the transcript isn't saved either. Say where it really failed.
+            // An older backend failed the whole transcription when pyannote failed (the transcript
+            // wasn't saved). Say where it really failed. Current backends keep the transcript and
+            // report a "diarization" error instead.
             if e.string("stage") == "transcription", Self.isDiarizationProblem(message) {
                 diarization.status = .failed
                 diarization.message = friendly
@@ -549,7 +550,9 @@ final class PipelineModel {
             case "transcription":
                 transcription.status = .failed; transcription.message = friendly
             case "diarization":
-                diarization.status = .failed; diarization.message = friendly
+                diarization.status = .failed
+                diarization.message = e.string("code") == "diarization_failed"
+                    ? friendly + " The transcript was kept, without speakers." : friendly
             case "summarization":
                 summarization.status = .failed; summarization.message = friendly
             case "vault":

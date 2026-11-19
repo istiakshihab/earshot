@@ -277,6 +277,32 @@ class TestProcess:
         assert state["stages"]["summarization"]["status"] == "skipped"
         assert "SPEAKER" not in (session_dir / "transcript.md").read_text()
 
+    def test_diarization_failure_keeps_the_transcript_and_exits_partial(self, config, session_dir):
+        class NoSpeakers(FakeTranscriber):
+            def transcribe(self, audio_path):
+                self.diarize = False  # what a failed pyannote leaves: a transcript without speakers
+                result = super().transcribe(audio_path)
+                self.diarization_error = RuntimeError("403 Client Error: gated repo")
+                return result
+
+        pipe = EventPipe()
+        with (
+            fakes(),
+            mock.patch("ownscribe.transcription.mlx_transcriber.MLXWhisperTranscriber", NoSpeakers),
+        ):
+            result = jobs.process(config, session_dir, sink=pipe.sink, summarize=False)
+        events = pipe.events()
+        errors = [e for e in events if e["ev"] == "error"]
+        state = sessions.load(session_dir)
+
+        assert state["stages"]["transcription"]["status"] == "done"
+        assert state["stages"]["diarization"]["status"] == "failed"
+        assert state["stages"]["diarization"]["error"]["code"] == "diarization_failed"
+        assert [(e["stage"], e["code"]) for e in errors] == [("diarization", "diarization_failed")]
+        assert "transcript" in [e["ev"] for e in events] and "speakers" not in [e["ev"] for e in events]
+        assert (session_dir / "transcript.json").exists()
+        assert result["exit_code"] == 2
+
     def test_summarizer_failure_keeps_the_transcript_and_exits_partial(self, config, session_dir):
         broken = FakeSummarizer()
         broken.summarize = mock.Mock(side_effect=RuntimeError("model crashed"))

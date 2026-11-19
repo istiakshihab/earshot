@@ -119,6 +119,9 @@ class MLXWhisperTranscriber(Transcriber):
         self._model_repo = self._resolve_model_repo()
         self._model_loaded = False
         self._diarize_model = None
+        # Why speaker identification failed in the last transcribe(), if it did. The transcript is
+        # still returned then, without speakers.
+        self.diarization_error: Exception | None = None
 
     def _resolve_model_repo(self) -> str:
         return _MLX_MODEL_REPOS.get(self._tx_config.model, self._tx_config.model)
@@ -236,6 +239,7 @@ class MLXWhisperTranscriber(Transcriber):
             )
             raise SystemExit(1)
 
+        self.diarization_error = None
         self._configure_runtime_env()
 
         hf_token_warning: str | None = None
@@ -283,7 +287,10 @@ class MLXWhisperTranscriber(Transcriber):
                 # Speakers are found from the audio alone, so pyannote runs while Whisper decodes.
                 diarization_result = None
                 if self._will_diarize() and self._diar_config.parallel:
-                    diarization_result = self._start_diarization(audio, exclusive=False)
+                    try:
+                        diarization_result = self._start_diarization(audio, exclusive=False)
+                    except Exception as exc:  # e.g. a token without access to the pyannote model
+                        self._diarization_failed(exc)
 
                 initial_prompt = self._tx_config.initial_prompt or None
                 if self._tx_config.hotwords:
@@ -342,10 +349,14 @@ class MLXWhisperTranscriber(Transcriber):
                 progress.complete("transcribing")
 
                 # --- Optional diarization ---
-                if diarization_result is not None:
-                    result = self._assign_speakers(diarization_result(), result)
-                elif self._will_diarize():
-                    result = self._diarize(audio, result)
+                # A failure here keeps the transcript, without speakers (see diarization_error).
+                try:
+                    if diarization_result is not None:
+                        result = self._assign_speakers(diarization_result(), result)
+                    elif self._will_diarize() and self.diarization_error is None:
+                        result = self._diarize(audio, result)
+                except Exception as exc:
+                    self._diarization_failed(exc)
         finally:
             devnull.close()
 
@@ -375,6 +386,10 @@ class MLXWhisperTranscriber(Transcriber):
 
         duration = audio.shape[0] / float(_SAMPLE_RATE)
         return TranscriptResult(segments=segments, language=language, duration=duration)
+
+    def _diarization_failed(self, exc: Exception) -> None:
+        self.diarization_error = exc
+        self._progress.fail("diarizing")
 
     def _diarize(self, audio, result):
         """Diarize after transcription (`[diarization] parallel = false`)."""

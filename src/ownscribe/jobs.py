@@ -226,7 +226,17 @@ def process(
     names: dict[str, str] = {}
     _write_transcript(path, result, names)
     sessions.set_stage(path, state, "transcription", "done", segments=len(result.segments))
-    if do_diarize:
+    # Speaker identification failing keeps the transcript, without speakers: only diarization fails.
+    diarization_error = getattr(transcriber, "diarization_error", None) if do_diarize else None
+    exit_code = 0
+    if diarization_error is not None:
+        message = str(diarization_error) or type(diarization_error).__name__
+        sessions.set_stage(
+            path, state, "diarization", "failed", error={"code": "diarization_failed", "message": message}
+        )
+        sink.emit("error", stage="diarization", code="diarization_failed", message=message)
+        exit_code = 2
+    elif do_diarize:
         sessions.set_stage(path, state, "diarization", "done", speakers=len(labels))
         sink.emit("speakers", labels=labels, names={}, roles={})
     else:
@@ -234,9 +244,8 @@ def process(
     _transcript_event(sink, path, result, names)
 
     # ---- summarization
-    exit_code = 0
     if do_summarize:
-        exit_code = _summarize(
+        exit_code = max(exit_code, _summarize(
             config,
             path,
             state,
@@ -245,7 +254,7 @@ def process(
             sink,
             progress_cls=EventProgress,
             download=_download_summarization_model if local_sum else None,
-        )
+        ))
         slug = _slugify(state.get("title") or "")
         if slug:
             new_path = _rename_output_dir(path, slug)

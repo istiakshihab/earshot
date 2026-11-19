@@ -15,6 +15,7 @@ The window opens sized to the screen and only the transcript and summary scroll.
 - **Processing:** after `saved`, `ownscribe process DIR --events-fd 3` with the template and the
   Diarization/Summarization switches. Speaker names run `ownscribe speakers DIR --set SPEAKER_00=Name`;
   a template change after a summary runs `ownscribe resummarize DIR --template T`. Cancel sends SIGTERM.
+  If speaker identification fails, the transcript is kept without speakers and only Diarization fails.
 - **Obsidian:** the fourth card files the recording into the vault, following `[obsidian]` in
   config.toml. With `confirm_before_filing = true` (the default) it waits for you: **File to Obsidian…**
   runs `ownscribe file DIR --preview` (Claude drafts the note with the speaker names entered so far) and

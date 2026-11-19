@@ -316,6 +316,10 @@ Stage names follow the terminal display: `preparing_models`, `transcribing`, `di
 sub-steps `segmentation`, `speaker_counting`, `embeddings`, `clustering`, then `summarizing` and
 `downloading_model`.
 
+**When diarization fails** (pyannote can't load or crashes), `process` keeps the transcript without speakers:
+transcription is `done`, an `error` with `stage: "diarization"`, `code: "diarization_failed"` follows, and the
+job exits 2.
+
 Error codes include `audio_missing`, `audio_silent`, `ffmpeg_missing`, `hf_token_missing`,
 `transcription_failed`, `diarization_failed`, `summarizer_unavailable`, `summarization_failed`,
 `claude_unavailable`, `vault_failed`.

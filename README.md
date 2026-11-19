@@ -22,12 +22,18 @@ vault. Transcription and speaker identification run on your Mac's GPU.
 It notices when a Zoom or Microsoft Teams call starts and asks whether to record it, then stops by
 itself when the call ends.
 
+<p align="center">
+  <img src="docs/images/earshot-main.png" width="900"
+       alt="Earshot after a recording: the level chart and mixer at the top, the processing steps and a transcript with named speakers below, and past recordings in the sidebar">
+</p>
+
 Earshot is a fork of [ownscribe](https://github.com/paberr/ownscribe) by Pascal Berrang. The Python
 backend and command-line tool are still called `ownscribe`; Earshot is the Mac app on top of them, plus
 MLX transcription, Obsidian filing and the capture work described below.
 
 ## Contents
 
+- [How it works](#how-it-works)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Install](#install)
@@ -40,6 +46,18 @@ MLX transcription, Obsidian filing and the capture work described below.
 - [Development](#development)
 - [Acknowledgments](#acknowledgments)
 - [License](#license)
+
+## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/pipeline-dark.svg">
+  <img src="docs/images/pipeline-light.svg" width="100%"
+       alt="Microphone, system audio and apps are recorded as separate tracks; transcription and speaker identification run in parallel on the GPU; then a summary, and optionally an Obsidian note">
+</picture>
+
+Earshot records each source to its own track and mixes them into one file when you stop. The backend
+then transcribes it with MLX Whisper while pyannote works out who spoke when, writes a summary with the
+template you picked, and, if you set it up, drafts an Obsidian note for you to review.
 
 ## Features
 
@@ -87,6 +105,7 @@ curl -fsSL https://raw.githubusercontent.com/istiakshihab/ownscribe-personalized
 ```
 
 The installer does the following:
+
 - puts the source in `~/.local/share/earshot/ownscribe`;
 - sets up the Python backend;
 - builds the capture helper and the app on your Mac;
@@ -140,6 +159,11 @@ From a checkout, `bash install.sh` builds and installs that checkout instead.
 4. **File to Obsidian** if it's set up. Earshot drafts the note, and you can edit the title, category,
    tags and text before it's written.
 
+<p align="center">
+  <img src="docs/images/earshot-mixer.png" width="900"
+       alt="Recording: a minute of levels in the Total signal chart, and mixer rows for system audio, the microphone and Zoom">
+</p>
+
 Past recordings are in the sidebar. Opening one shows the same view, so all of this works on old
 recordings too.
 
@@ -150,6 +174,11 @@ the screen and asks **Record** or **Not now**. It sits over the call without tak
 record, the meeting app gets its own source next to the mic and system audio. About 20 seconds after the
 call ends, that recording stops and goes through processing. Recordings you start yourself are never
 stopped by detection.
+
+<p align="center">
+  <img src="docs/images/earshot-call-prompt.png" width="468"
+       alt="The call prompt: Zoom call started. Record it with Earshot? Not now, Record">
+</p>
 
 Settings ▸ Meetings:
 
@@ -184,6 +213,7 @@ all run on your Mac.
 
 Some features send transcript *text*, never audio, to Claude through the `claude` CLI, and only if you
 use them:
+
 - **Obsidian filing**, to categorize the transcript and write the note;
 - **speaker naming in the terminal**, which describes each speaker's role so you can tell them apart;
 - **the `claude` summary backend**, if you choose it.
